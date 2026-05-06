@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Codex Remote</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="sidebar" aria-label="Sessions">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Codex Remote</p>
+            <h1>Chats</h1>
+          </div>
+          <button id="refreshSidebar" title="Refresh sidebar" aria-label="Refresh sidebar">R</button>
+        </header>
+
+        <form id="authForm" class="auth">
+          <label for="token">Access token</label>
+          <div class="row">
+            <input id="token" name="token" type="password" autocomplete="current-password">
+            <button type="submit">Save</button>
+          </div>
+        </form>
+
+        <a id="terminalLink" class="terminalLink" href="#" hidden>SSH</a>
+        <div id="sidebarTree" class="sidebarTree"></div>
+      </section>
+
+      <section class="workspace" aria-label="Chat">
+        <header class="chatHeader">
+          <div>
+            <p id="sessionKicker" class="eyebrow">New thread</p>
+            <h2 id="sessionTitle">Codex</h2>
+          </div>
+          <input id="cwd" aria-label="Working directory" placeholder="Working directory">
+        </header>
+
+        <div id="messages" class="messages"></div>
+
+        <form id="chatForm" class="composer">
+          <textarea id="prompt" rows="4" placeholder="Ask Codex"></textarea>
+          <button id="send" type="submit">Send</button>
+        </form>
+      </section>
+    </main>
+    <script src="/app.js?v=8" type="module"></script>
+  </body>
+</html>
