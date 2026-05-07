@@ -3,14 +3,14 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { AppServerManager } from "./appServerManager.js";
 import { isAuthorized } from "./auth.js";
-import { runCodex } from "./codexRunner.js";
-import { getProjectSummary, getSidebarTree, listSessions, listSessionsForProject, readSessionMessages } from "./sessions.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "..", "public");
 const port = Number(process.env.PORT || 8787);
 const host = process.env.HOST || "0.0.0.0";
+const appServer = new AppServerManager();
 
 export const server = createServer(async (req, res) => {
   try {
@@ -23,32 +23,51 @@ export const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/config") {
       return sendJson(res, 200, {
         defaultCwd: process.env.CODEX_WEB_DEFAULT_CWD || process.cwd(),
-        terminalUrl: process.env.CODEX_WEB_TERMINAL_URL || ""
+        defaultModel: process.env.CODEX_WEB_DEFAULT_MODEL || "gpt-5.4",
+        modelOptions: getModelOptions(),
+        defaultReasoningEffort: process.env.CODEX_WEB_DEFAULT_REASONING_EFFORT || "medium",
+        reasoningEffortOptions: getReasoningEffortOptions(),
+        terminalUrl: process.env.CODEX_WEB_TERMINAL_URL || "",
+        transportMode: "app-server"
       });
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/connection/status") {
+      return sendJson(res, 200, appServer.getStatus());
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/connection/diagnostics") {
+      return sendJson(res, 200, appServer.getDiagnostics());
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/connection/connect") {
+      return sendJson(res, 200, await appServer.connect());
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/connection/disconnect") {
+      return sendJson(res, 200, await appServer.disconnect());
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/sidebar") {
+      const limit = Number(url.searchParams.get("limit") || 1000);
+      return sendJson(res, 200, await appServer.getSidebar({ limit }));
     }
 
     if (req.method === "GET" && url.pathname === "/api/sessions") {
       const limit = Number(url.searchParams.get("limit") || 100);
-      const cwd = url.searchParams.get("cwd");
-      const sessions = cwd
-        ? await listSessionsForProject(cwd, { limit })
-        : await listSessions({ limit });
+      const cwd = url.searchParams.get("cwd") || "";
+      const sessions = await appServer.listThreads({ limit, cwd });
       return sendJson(res, 200, { sessions });
     }
 
     if (req.method === "GET" && url.pathname === "/api/projects") {
       const limit = Number(url.searchParams.get("limit") || 500);
-      return sendJson(res, 200, await getProjectSummary({ limit }));
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/sidebar") {
-      const limit = Number(url.searchParams.get("limit") || 1000);
-      return sendJson(res, 200, await getSidebarTree({ limit }));
+      return sendJson(res, 200, await appServer.getSidebar({ limit }));
     }
 
     if (req.method === "GET" && url.pathname.startsWith("/api/sessions/")) {
       const sessionId = decodeURIComponent(url.pathname.split("/").at(-1));
-      return sendJson(res, 200, { messages: await readSessionMessages(sessionId) });
+      return sendJson(res, 200, { messages: await appServer.readThreadMessages(sessionId) });
     }
 
     if (req.method === "POST" && url.pathname === "/api/chat") {
@@ -83,20 +102,25 @@ async function streamChat(req, res) {
     "X-Accel-Buffering": "no"
   });
 
-  const child = runCodex({
-    prompt,
-    sessionId: body.sessionId ? String(body.sessionId) : "",
-    cwd: body.cwd ? String(body.cwd) : process.env.CODEX_WEB_DEFAULT_CWD,
-    onEvent: (event) => writeSse(res, "codex", event),
-    onExit: (code) => {
-      writeSse(res, "done", { code });
-      res.end();
-    }
-  });
-
-  req.on("close", () => {
-    if (!child.killed) child.kill();
-  });
+  try {
+    const result = await appServer.streamTurn({
+      prompt,
+      threadId: body.sessionId ? String(body.sessionId) : "",
+      cwd: body.cwd ? String(body.cwd) : process.env.CODEX_WEB_DEFAULT_CWD,
+      model: body.model ? String(body.model).trim() : "",
+      reasoningEffort: body.reasoningEffort ? String(body.reasoningEffort).trim() : "",
+      onEvent: (event) => {
+        if (event.type === "thread") return writeSse(res, "thread", event.thread);
+        if (event.type === "assistant-delta") return writeSse(res, "delta", { delta: event.delta });
+        if (event.type === "assistant-complete") return writeSse(res, "message", { text: event.text });
+      }
+    });
+    writeSse(res, "done", result);
+  } catch (error) {
+    writeSse(res, "error", { message: error.message });
+  } finally {
+    res.end();
+  }
 }
 
 function writeSse(res, event, data) {
@@ -132,4 +156,14 @@ function contentType(filePath) {
   if (filePath.endsWith(".css")) return "text/css; charset=utf-8";
   if (filePath.endsWith(".js")) return "text/javascript; charset=utf-8";
   return "text/html; charset=utf-8";
+}
+
+function getModelOptions() {
+  const raw = process.env.CODEX_WEB_MODEL_OPTIONS?.trim();
+  if (!raw) return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"];
+  return raw.split(",").map((value) => value.trim()).filter(Boolean);
+}
+
+function getReasoningEffortOptions() {
+  return ["low", "medium", "high", "xhigh"];
 }

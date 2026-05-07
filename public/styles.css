@@ -100,6 +100,12 @@ textarea {
   padding: 18px 16px 12px;
 }
 
+.topbarActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .eyebrow {
   margin: 0 0 4px;
   color: var(--muted);
@@ -164,6 +170,54 @@ h2 {
   margin-top: 5px;
   color: var(--muted);
   font-size: 13px;
+}
+
+.connectionStatus {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.connectionStatus.connected {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.connectionStatus.connecting {
+  background: rgba(243, 198, 78, 0.18);
+  color: #7f5b08;
+}
+
+.connectionStatus.errored {
+  background: rgba(199, 115, 42, 0.16);
+  color: var(--danger);
+}
+
+.connectionButton {
+  min-width: 92px;
+  min-height: 36px;
+  border: 1px solid rgba(25, 108, 94, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink);
+  padding: 0 14px;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+}
+
+.connectionButton:hover:not(:disabled) {
+  background: #ffffff;
+  border-color: rgba(25, 108, 94, 0.28);
+}
+
+.connectionButton:disabled {
+  cursor: default;
+  opacity: 0.7;
 }
 
 .auth {
@@ -397,8 +451,74 @@ h2 {
   padding-bottom: 2px;
 }
 
-.chatHeader input {
-  max-width: 520px;
+.healthPanel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.healthCard {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.healthLabel {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.healthCard strong {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.healthMeta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.healthCard[data-health="healthy"] {
+  border-color: rgba(25, 108, 94, 0.18);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(236, 246, 243, 0.92));
+}
+
+.healthCard[data-health="warning"] {
+  border-color: rgba(205, 164, 46, 0.24);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 246, 232, 0.92));
+}
+
+.healthCard[data-health="error"],
+.healthCard[data-health="offline"] {
+  border-color: rgba(155, 84, 35, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(252, 246, 242, 0.92));
+}
+
+.chatControls {
+  display: grid;
+  grid-template-columns: minmax(320px, 520px);
+  align-items: end;
+}
+
+.controlField {
+  display: grid;
+  gap: 6px;
+}
+
+.controlField span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.controlFieldWide {
+  min-width: 0;
+}
+
+.chatControls input {
   background: rgba(255, 255, 255, 0.92);
 }
 
@@ -448,6 +568,95 @@ h2 {
 .message.error .messageMeta,
 .message.stderr .messageMeta {
   color: var(--danger);
+}
+
+.logPanel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  overflow: hidden;
+}
+
+.logPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(210, 218, 226, 0.8);
+}
+
+.logPanelHeader h3 {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.logToggle {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 0 12px;
+}
+
+.logBody {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.logEntries {
+  display: grid;
+}
+
+.logEntry {
+  display: grid;
+  grid-template-columns: 72px 120px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 14px;
+  border-top: 1px solid rgba(210, 218, 226, 0.6);
+  font-size: 13px;
+}
+
+.logEntry:first-child {
+  border-top: 0;
+}
+
+.logLevel {
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.logEntry[data-level="error"] .logLevel {
+  color: var(--danger);
+}
+
+.logEntry[data-level="warn"] .logLevel {
+  color: #8d6510;
+}
+
+.logEntry[data-level="status"] .logLevel {
+  color: var(--accent);
+}
+
+.logTime {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.logMessage {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.logEmpty {
+  padding: 14px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .messageBody {
@@ -582,11 +791,106 @@ h2 {
   gap: 12px;
 }
 
+.composerMain {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
 .composer textarea {
   background: rgba(255, 255, 255, 0.96);
 }
 
-.composer button {
+.composerFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 2px;
+}
+
+.composerSelectors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.picker {
+  position: relative;
+}
+
+.pickerButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 40px;
+  min-width: 132px;
+  padding: 0 14px;
+  border: 1px solid #b9d6cf;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #217567 0%, #196c5e 100%);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: transform 180ms ease, filter 180ms ease, box-shadow 180ms ease;
+}
+
+.pickerButton:hover {
+  filter: brightness(1.03);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 8px 18px rgba(25, 108, 94, 0.18);
+}
+
+.pickerButton svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pickerMenu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  min-width: 188px;
+  padding: 8px;
+  border: 1px solid rgba(193, 205, 215, 0.95);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 24px 48px rgba(18, 31, 39, 0.18);
+  backdrop-filter: blur(10px);
+  z-index: 20;
+}
+
+.pickerOption {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  padding: 10px 14px;
+  font-weight: 600;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+}
+
+.pickerOption:hover {
+  background: #f4f7f9;
+  border-color: #d7e1e8;
+  color: #142027;
+}
+
+.pickerOption.selected {
+  background: #eaf1ef;
+  border-color: #b7d3cc;
+  color: #14352f;
+}
+
+.sendButton {
   min-width: 100px;
   border: 1px solid var(--accent);
   border-radius: 8px;
@@ -595,11 +899,11 @@ h2 {
   transition: filter 180ms ease, opacity 180ms ease;
 }
 
-.composer button:hover {
+.sendButton:hover {
   filter: brightness(1.04);
 }
 
-.composer button:disabled {
+.sendButton:disabled {
   cursor: progress;
   opacity: 0.72;
 }
@@ -654,8 +958,17 @@ h2 {
     align-items: stretch;
   }
 
-  .chatHeader input {
-    max-width: none;
+  .healthPanel {
+    grid-template-columns: 1fr;
+  }
+
+  .chatControls {
+    grid-template-columns: 1fr;
+  }
+
+  .composerFooter {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .emptyState {

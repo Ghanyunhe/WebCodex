@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Codex Remote</title>
-    <link rel="stylesheet" href="/styles.css?v=2">
+    <link rel="stylesheet" href="/styles.css?v=3">
   </head>
   <body>
     <main class="shell">
@@ -15,7 +15,11 @@
             <h1>Chats</h1>
             <span class="brandNote">Projects and sessions stay anchored in the sidebar.</span>
           </div>
-          <button id="refreshSidebar" title="Refresh sidebar" aria-label="Refresh sidebar"></button>
+          <div class="topbarActions">
+            <span id="connectionStatus" class="connectionStatus disconnected">Disconnected</span>
+            <button id="connectionButton" class="connectionButton" type="button">Connect</button>
+            <button id="refreshSidebar" title="Refresh sidebar" aria-label="Refresh sidebar"></button>
+          </div>
         </header>
 
         <form id="authForm" class="auth">
@@ -36,17 +40,62 @@
             <p id="sessionKicker" class="eyebrow">New thread</p>
             <h2 id="sessionTitle">Codex</h2>
           </div>
-          <input id="cwd" aria-label="Working directory" placeholder="Working directory">
+          <div class="chatControls">
+            <label class="controlField controlFieldWide" for="cwd">
+              <span>Working directory</span>
+              <input id="cwd" aria-label="Working directory" placeholder="Working directory">
+            </label>
+          </div>
         </header>
+
+        <section class="healthPanel" aria-label="Connection health">
+          <div class="healthCard">
+            <span class="healthLabel">Connection</span>
+            <strong id="healthSummary">Offline</strong>
+            <span id="healthMeta" class="healthMeta">App-server is offline</span>
+          </div>
+          <div class="healthCard">
+            <span class="healthLabel">Process</span>
+            <strong id="processMeta">Not running</strong>
+            <span id="activityMeta" class="healthMeta">No recent activity</span>
+          </div>
+        </section>
 
         <div id="messages" class="messages"></div>
 
+        <section class="logPanel" aria-label="App-server logs">
+          <div class="logPanelHeader">
+            <div>
+              <p class="eyebrow">App-server</p>
+              <h3>Recent logs</h3>
+            </div>
+            <button id="toggleLogs" class="logToggle" type="button" aria-expanded="false">Show logs</button>
+          </div>
+          <div id="logBody" class="logBody" hidden>
+            <div id="logEntries" class="logEntries"></div>
+          </div>
+        </section>
+
         <form id="chatForm" class="composer">
-          <textarea id="prompt" rows="4" placeholder="Ask Codex"></textarea>
-          <button id="send" type="submit">Send</button>
+          <div class="composerMain">
+            <textarea id="prompt" rows="4" placeholder="Ask Codex"></textarea>
+            <div class="composerFooter">
+              <div class="composerSelectors">
+                <div class="picker" data-picker="reasoning">
+                  <button id="reasoningButton" class="pickerButton" type="button" aria-haspopup="listbox" aria-expanded="false"></button>
+                  <div id="reasoningMenu" class="pickerMenu" hidden></div>
+                </div>
+                <div class="picker" data-picker="model">
+                  <button id="modelButton" class="pickerButton" type="button" aria-haspopup="listbox" aria-expanded="false"></button>
+                  <div id="modelMenu" class="pickerMenu" hidden></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <button id="send" class="sendButton" type="submit">Send</button>
         </form>
       </section>
     </main>
-    <script src="/app.js?v=9" type="module"></script>
+    <script src="/app.js?v=12" type="module"></script>
   </body>
 </html>

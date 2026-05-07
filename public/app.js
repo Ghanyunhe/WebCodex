@@ -30,27 +30,55 @@ const ICONS = {
       <path d="m5 7 5 5-5 5" />
       <path d="M13 17h6" />
     </svg>
+  `,
+  chevronDown: `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m6 9 6 6 6-6" />
+    </svg>
   `
 };
 
 const state = {
   token: localStorage.getItem("codex-web-token") || "dev-token",
+  model: localStorage.getItem("codex-web-model") || "",
+  reasoningEffort: localStorage.getItem("codex-web-reasoning-effort") || "",
+  connected: false,
+  connectionStatus: "disconnected",
+  diagnostics: null,
+  logsExpanded: false,
+  diagnosticsTimer: 0,
   selectedProjectCwd: "",
   selectedProjectName: "",
   selectedSessionId: "",
   expandedProjects: new Set(),
   sidebar: { projects: [], totalSessionCount: 0 },
+  modelOptions: [],
+  reasoningEffortOptions: [],
+  openPicker: "",
   busy: false
 };
 
 const els = {
   authForm: document.querySelector("#authForm"),
   token: document.querySelector("#token"),
+  connectionStatus: document.querySelector("#connectionStatus"),
+  connectionButton: document.querySelector("#connectionButton"),
+  healthSummary: document.querySelector("#healthSummary"),
+  healthMeta: document.querySelector("#healthMeta"),
+  processMeta: document.querySelector("#processMeta"),
+  activityMeta: document.querySelector("#activityMeta"),
+  toggleLogs: document.querySelector("#toggleLogs"),
+  logBody: document.querySelector("#logBody"),
+  logEntries: document.querySelector("#logEntries"),
   sidebarTree: document.querySelector("#sidebarTree"),
   refreshSidebar: document.querySelector("#refreshSidebar"),
   terminalLink: document.querySelector("#terminalLink"),
   sessionKicker: document.querySelector("#sessionKicker"),
   sessionTitle: document.querySelector("#sessionTitle"),
+  modelButton: document.querySelector("#modelButton"),
+  modelMenu: document.querySelector("#modelMenu"),
+  reasoningButton: document.querySelector("#reasoningButton"),
+  reasoningMenu: document.querySelector("#reasoningMenu"),
   cwd: document.querySelector("#cwd"),
   messages: document.querySelector("#messages"),
   chatForm: document.querySelector("#chatForm"),
@@ -61,25 +89,55 @@ const els = {
 els.refreshSidebar.innerHTML = ICONS.refresh;
 els.terminalLink.innerHTML = `${ICONS.terminal}<span>SSH</span>`;
 els.token.value = state.token;
+renderPickerButtons();
+renderConnectionState();
+renderDiagnostics();
 
 void loadConfig();
-void loadSidebar();
-renderEmptyChat("Select a project or session to start.");
+void loadConnectionStatus();
+renderEmptyChat("Connect to app-server to load projects and chat.");
 
-els.authForm.addEventListener("submit", (event) => {
+els.authForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   state.token = els.token.value.trim();
   localStorage.setItem("codex-web-token", state.token);
-  void loadSidebar();
+  await loadConnectionStatus();
 });
 
 els.refreshSidebar.addEventListener("click", () => {
-  void loadSidebar();
+  if (state.connected) void loadSidebar();
+});
+
+els.connectionButton.addEventListener("click", async () => {
+  if (state.connectionStatus === "connecting") return;
+  if (state.connected) {
+    await disconnectAppServer();
+  } else {
+    await connectAppServer();
+  }
+});
+
+els.toggleLogs.addEventListener("click", () => {
+  state.logsExpanded = !state.logsExpanded;
+  renderDiagnostics();
+});
+
+els.modelButton.addEventListener("click", () => togglePicker("model"));
+els.reasoningButton.addEventListener("click", () => togglePicker("reasoning"));
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".picker")) {
+    closePicker();
+  }
 });
 
 els.chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (state.busy) return;
+  if (!state.connected) {
+    showSystem("Connect to app-server before sending a message.");
+    return;
+  }
 
   const prompt = els.prompt.value.trim();
   if (!prompt) return;
@@ -97,13 +155,255 @@ els.chatForm.addEventListener("submit", async (event) => {
 async function loadConfig() {
   const config = await api("/api/config").catch(() => ({}));
   if (config.defaultCwd) els.cwd.value = config.defaultCwd;
+  state.modelOptions = config.modelOptions || [];
+  state.reasoningEffortOptions = config.reasoningEffortOptions || [];
+  if (!state.model && config.defaultModel) {
+    state.model = String(config.defaultModel);
+    localStorage.setItem("codex-web-model", state.model);
+  }
+  if (!state.reasoningEffort && config.defaultReasoningEffort) {
+    state.reasoningEffort = String(config.defaultReasoningEffort);
+    localStorage.setItem("codex-web-reasoning-effort", state.reasoningEffort);
+  }
+  renderPickerButtons();
+  renderPickerMenus();
+  updateComposerState();
   if (config.terminalUrl) {
     els.terminalLink.href = config.terminalUrl;
     els.terminalLink.hidden = false;
   }
 }
 
+async function loadConnectionStatus() {
+  const status = await api("/api/connection/status").catch(() => null);
+  if (!status) return;
+  applyConnectionStatus(status);
+  await loadDiagnostics();
+  if (state.connected) {
+    await loadSidebar();
+  } else {
+    renderSidebarDisconnected();
+  }
+}
+
+async function connectAppServer() {
+  state.connectionStatus = "connecting";
+  renderConnectionState();
+  try {
+    const status = await post("/api/connection/connect");
+    applyConnectionStatus(status);
+    await loadDiagnostics();
+    await loadSidebar();
+  } catch (error) {
+    state.connected = false;
+    state.connectionStatus = "errored";
+    renderConnectionState();
+    renderSidebarError(error.message);
+    renderEmptyChat("App-server failed to connect.");
+  }
+}
+
+async function disconnectAppServer() {
+  try {
+    await post("/api/connection/disconnect");
+  } finally {
+    applyConnectionStatus({ status: "disconnected", connected: false });
+    state.diagnostics = null;
+    state.sidebar = { projects: [], totalSessionCount: 0 };
+    state.selectedProjectCwd = "";
+    state.selectedProjectName = "";
+    state.selectedSessionId = "";
+    els.sessionKicker.textContent = "Offline";
+    els.sessionTitle.textContent = "Connect app-server";
+    renderSidebarDisconnected();
+    renderEmptyChat("Connect to app-server to load projects and chat.");
+    renderDiagnostics();
+  }
+}
+
+function applyConnectionStatus(status) {
+  state.connected = Boolean(status.connected);
+  state.connectionStatus = status.status || (state.connected ? "connected" : "disconnected");
+  if (status.health) {
+    state.diagnostics = {
+      ...(state.diagnostics || {}),
+      health: status.health,
+      status: status.status
+    };
+  }
+  if (status.defaultCwd && !state.selectedProjectCwd) {
+    els.cwd.value = status.defaultCwd;
+  }
+  renderConnectionState();
+  syncDiagnosticsPolling();
+}
+
+function renderConnectionState() {
+  els.connectionStatus.textContent = connectionLabel(state.connectionStatus);
+  els.connectionStatus.className = `connectionStatus ${state.connectionStatus}`;
+  els.connectionButton.textContent = state.connected
+    ? "Disconnect"
+    : state.connectionStatus === "connecting"
+      ? "Connecting..."
+      : "Connect";
+  els.connectionButton.disabled = state.connectionStatus === "connecting" || state.busy;
+  updateComposerState();
+}
+
+async function loadDiagnostics() {
+  const diagnostics = await api("/api/connection/diagnostics").catch(() => null);
+  if (!diagnostics) return;
+  state.diagnostics = diagnostics;
+  renderDiagnostics();
+}
+
+function syncDiagnosticsPolling() {
+  if (state.diagnosticsTimer) {
+    window.clearInterval(state.diagnosticsTimer);
+    state.diagnosticsTimer = 0;
+  }
+  if (!state.connected) return;
+  state.diagnosticsTimer = window.setInterval(() => {
+    void loadDiagnostics();
+  }, 5000);
+}
+
+function renderDiagnostics() {
+  const diagnostics = state.diagnostics;
+  const healthLevel = diagnostics?.health?.level || (state.connected ? "healthy" : "offline");
+  const healthSummary = diagnostics?.health?.summary || (state.connected ? "Connected" : "App-server is offline");
+  const processText = diagnostics?.processId ? `PID ${diagnostics.processId}` : "Not running";
+  const activityText = diagnostics?.lastActivityAt ? `Last activity ${formatTimestamp(diagnostics.lastActivityAt)}` : "No recent activity";
+
+  els.healthSummary.textContent = titleCase(healthLevel);
+  els.healthMeta.textContent = healthSummary;
+  els.processMeta.textContent = processText;
+  els.activityMeta.textContent = activityText;
+  els.healthSummary.closest(".healthCard").dataset.health = healthLevel;
+  els.processMeta.closest(".healthCard").dataset.health = healthLevel;
+
+  els.toggleLogs.textContent = state.logsExpanded ? "Hide logs" : "Show logs";
+  els.toggleLogs.setAttribute("aria-expanded", String(state.logsExpanded));
+  els.logBody.hidden = !state.logsExpanded;
+
+  const logs = diagnostics?.logs || [];
+  if (!logs.length) {
+    const empty = document.createElement("div");
+    empty.className = "logEmpty";
+    empty.textContent = "No app-server logs yet.";
+    els.logEntries.replaceChildren(empty);
+    return;
+  }
+
+  const entries = logs.slice().reverse().map((entry) => {
+    const row = document.createElement("article");
+    row.className = "logEntry";
+    row.dataset.level = entry.level || "info";
+    row.innerHTML = `
+      <span class="logLevel"></span>
+      <time class="logTime"></time>
+      <div class="logMessage"></div>
+    `;
+    row.querySelector(".logLevel").textContent = entry.level || "info";
+    row.querySelector(".logTime").textContent = formatTimestamp(entry.at);
+    row.querySelector(".logMessage").textContent = entry.message || "";
+    return row;
+  });
+  els.logEntries.replaceChildren(...entries);
+}
+
+function updateComposerState() {
+  const disabled = !state.connected || state.busy;
+  els.prompt.disabled = !state.connected;
+  els.cwd.disabled = !state.connected;
+  els.send.disabled = disabled;
+  els.modelButton.disabled = disabled;
+  els.reasoningButton.disabled = disabled;
+}
+
+function renderPickerButtons() {
+  els.reasoningButton.innerHTML = `${reasoningLabel(state.reasoningEffort || "medium")}${ICONS.chevronDown}`;
+  els.modelButton.innerHTML = `${state.model || "gpt-5.4"}${ICONS.chevronDown}`;
+}
+
+function renderPickerMenus() {
+  const reasoningItems = state.reasoningEffortOptions.map((value) =>
+    buildMenuItem({
+      text: reasoningLabel(value),
+      selected: value === state.reasoningEffort,
+      onSelect: () => {
+        state.reasoningEffort = value;
+        localStorage.setItem("codex-web-reasoning-effort", state.reasoningEffort);
+        renderPickerButtons();
+        renderPickerMenus();
+        closePicker();
+      }
+    })
+  );
+  els.reasoningMenu.replaceChildren(...reasoningItems);
+
+  const modelItems = state.modelOptions.map((value) =>
+    buildMenuItem({
+      text: value,
+      selected: value === state.model,
+      onSelect: () => {
+        state.model = value;
+        localStorage.setItem("codex-web-model", state.model);
+        renderPickerButtons();
+        renderPickerMenus();
+        closePicker();
+      }
+    })
+  );
+  els.modelMenu.replaceChildren(...modelItems);
+}
+
+function buildMenuItem({ text, selected, onSelect }) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `pickerOption${selected ? " selected" : ""}`;
+  button.textContent = text;
+  button.addEventListener("click", onSelect);
+  return button;
+}
+
+function togglePicker(name) {
+  if (!state.connected || state.busy) return;
+  state.openPicker = state.openPicker === name ? "" : name;
+  syncPickerVisibility();
+}
+
+function closePicker() {
+  if (!state.openPicker) return;
+  state.openPicker = "";
+  syncPickerVisibility();
+}
+
+function syncPickerVisibility() {
+  const reasoningOpen = state.openPicker === "reasoning";
+  const modelOpen = state.openPicker === "model";
+  els.reasoningMenu.hidden = !reasoningOpen;
+  els.modelMenu.hidden = !modelOpen;
+  els.reasoningButton.setAttribute("aria-expanded", String(reasoningOpen));
+  els.modelButton.setAttribute("aria-expanded", String(modelOpen));
+}
+
+function reasoningLabel(value) {
+  const labels = {
+    low: "低",
+    medium: "中",
+    high: "高",
+    xhigh: "超高"
+  };
+  return labels[value] || value;
+}
+
 async function loadSidebar() {
+  if (!state.connected) {
+    renderSidebarDisconnected();
+    return;
+  }
+
   const data = await api("/api/sidebar").catch((error) => {
     renderSidebarError(error.message);
     return null;
@@ -112,6 +412,7 @@ async function loadSidebar() {
 
   state.sidebar = data;
   renderSidebar(data);
+  syncSelectionFromSidebar();
   markActiveSession();
 }
 
@@ -125,6 +426,13 @@ function renderSidebar(data) {
 
   const groups = data.projects.map(renderProjectGroup);
   els.sidebarTree.replaceChildren(header, ...groups);
+}
+
+function renderSidebarDisconnected() {
+  const item = document.createElement("div");
+  item.className = "sidebarError";
+  item.textContent = "Connect to app-server to load projects.";
+  els.sidebarTree.replaceChildren(item);
 }
 
 function renderSidebarError(message) {
@@ -259,6 +567,21 @@ function selectSession(project, session, messages) {
   markActiveSession();
 }
 
+function syncSelectionFromSidebar() {
+  if (!state.selectedSessionId) return;
+
+  for (const project of state.sidebar.projects) {
+    const match = project.sessions.find((session) => session.id === state.selectedSessionId);
+    if (!match) continue;
+    state.selectedProjectCwd = project.cwd;
+    state.selectedProjectName = project.name;
+    els.cwd.value = project.cwd;
+    els.sessionKicker.textContent = project.name;
+    els.sessionTitle.textContent = match.title;
+    return;
+  }
+}
+
 function markActiveSession() {
   for (const group of els.sidebarTree.querySelectorAll(".projectGroup")) {
     group.classList.toggle("activeProject", group.dataset.cwd === state.selectedProjectCwd);
@@ -270,12 +593,11 @@ function markActiveSession() {
 
 async function sendPrompt(prompt) {
   state.busy = true;
-  els.send.disabled = true;
+  updateComposerState();
+  els.connectionButton.disabled = true;
   els.send.textContent = "Sending...";
   const assistant = addMessage("assistant", "");
   const assistantBody = assistant.querySelector(".messageBody");
-  const wasDraftSession = !state.selectedSessionId;
-  const draftProjectCwd = state.selectedProjectCwd || els.cwd.value.trim();
 
   try {
     const response = await fetch("/api/chat", {
@@ -287,7 +609,9 @@ async function sendPrompt(prompt) {
       body: JSON.stringify({
         prompt,
         sessionId: state.selectedSessionId,
-        cwd: els.cwd.value.trim()
+        cwd: els.cwd.value.trim(),
+        model: state.model.trim(),
+        reasoningEffort: state.reasoningEffort.trim()
       })
     });
 
@@ -304,62 +628,79 @@ async function sendPrompt(prompt) {
       buffer += decoder.decode(value, { stream: true });
       const events = buffer.split("\n\n");
       buffer = events.pop() || "";
-      for (const event of events) handleSse(event, assistantBody);
+      for (const event of events) handleSse(event, assistantBody, assistant);
     }
   } catch (error) {
     assistant.classList.add("error");
-    assistantBody.textContent += `\n${error.message}`;
+    renderMessageContent(assistantBody, `${assistantBody.dataset.raw || ""}\n${error.message}`.trim());
   } finally {
     state.busy = false;
-    els.send.disabled = false;
+    els.connectionButton.disabled = false;
     els.send.textContent = "Send";
-    await loadSidebar();
-    if (wasDraftSession && draftProjectCwd) {
-      selectNewestSessionForProject(draftProjectCwd);
-    }
+    renderConnectionState();
+    if (state.connected) await loadSidebar();
+    await loadDiagnostics();
   }
 }
 
-function selectNewestSessionForProject(cwd) {
-  const project = state.sidebar.projects.find((item) => item.cwd === cwd);
-  const newest = project?.sessions?.[0];
-  if (!project || !newest) return;
-  state.selectedProjectCwd = project.cwd;
-  state.selectedProjectName = project.name;
-  state.selectedSessionId = newest.id;
-  els.sessionKicker.textContent = project.name;
-  els.sessionTitle.textContent = newest.title;
-  markActiveSession();
-}
-
-function handleSse(raw, assistantBody) {
+function handleSse(raw, assistantBody, assistant) {
+  const eventLine = raw.split("\n").find((line) => line.startsWith("event: "));
   const dataLine = raw.split("\n").find((line) => line.startsWith("data: "));
   if (!dataLine) return;
+
+  const eventName = eventLine ? eventLine.slice(7).trim() : "";
   const data = JSON.parse(dataLine.slice(6));
-  if (data.stream === "stderr" || data.stream === "error") {
-    addMessage(data.stream, data.line);
+
+  if (eventName === "thread") {
+    state.selectedSessionId = data.id || state.selectedSessionId;
+    state.selectedProjectCwd = data.cwd || state.selectedProjectCwd;
+    state.selectedProjectName = projectNameFromPath(state.selectedProjectCwd) || state.selectedProjectName;
+    els.sessionKicker.textContent = state.selectedProjectName || "Thread";
+    els.sessionTitle.textContent = data.title || "New chat";
+    markActiveSession();
     return;
   }
-  const nextText = (assistantBody.dataset.raw || "") + formatCodexLine(data.line);
-  renderMessageContent(assistantBody, nextText);
-  assistantBody.parentElement.scrollIntoView({ block: "end" });
-}
 
-function formatCodexLine(line) {
-  try {
-    const event = JSON.parse(line);
-    const text = event?.payload?.content?.[0]?.text
-      || event?.payload?.message
-      || event?.payload?.text
-      || "";
-    return text ? `${text}\n` : `${line}\n`;
-  } catch {
-    return `${line}\n`;
+  if (eventName === "warning") {
+    addMessage("error", data.message || "");
+    return;
+  }
+
+  if (eventName === "stderr") {
+    addMessage("stderr", data.line || "");
+    return;
+  }
+
+  if (eventName === "error") {
+    assistant.classList.add("error");
+    renderMessageContent(assistantBody, `${assistantBody.dataset.raw || ""}\n${data.message || ""}`.trim());
+    return;
+  }
+
+  if (eventName === "delta") {
+    const nextText = (assistantBody.dataset.raw || "") + (data.delta || "");
+    renderMessageContent(assistantBody, nextText);
+    assistantBody.parentElement.scrollIntoView({ block: "end" });
+    return;
+  }
+
+  if (eventName === "message" && !assistantBody.dataset.raw) {
+    renderMessageContent(assistantBody, data.text || "");
   }
 }
 
 async function api(path) {
   const response = await fetch(path, {
+    headers: { Authorization: `Bearer ${state.token}` }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || response.statusText);
+  return data;
+}
+
+async function post(path) {
+  const response = await fetch(path, {
+    method: "POST",
     headers: { Authorization: `Bearer ${state.token}` }
   });
   const data = await response.json().catch(() => ({}));
@@ -411,6 +752,13 @@ function roleLabel(role) {
   if (role === "assistant") return "Codex";
   if (role === "stderr") return "stderr";
   return "System";
+}
+
+function connectionLabel(status) {
+  if (status === "connected") return "Connected";
+  if (status === "connecting") return "Connecting";
+  if (status === "errored") return "Error";
+  return "Disconnected";
 }
 
 function relativeTime(value) {
@@ -591,4 +939,22 @@ function renderInlineTokens(text) {
 
 function normalizeInlineCode(text) {
   return text.replace(/^\s+/, "").replace(/\s+$/, "");
+}
+
+function projectNameFromPath(cwd) {
+  return String(cwd || "").split(/[\\/]/).filter(Boolean).at(-1) || "";
+}
+
+function formatTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function titleCase(value) {
+  return String(value || "")
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }

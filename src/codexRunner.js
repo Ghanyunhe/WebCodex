@@ -1,20 +1,26 @@
 import { spawn } from "node:child_process";
 import os from "node:os";
 
-export function buildCodexArgs({ prompt, sessionId, cwd }) {
+export function buildCodexArgs({ prompt, sessionId, cwd, model, reasoningEffort }) {
   if (sessionId) {
-    return ["exec", "resume", "--json", "--all", sessionId, prompt];
+    const args = ["exec", "resume", "--json", "--all"];
+    if (model) args.push("--model", model);
+    if (reasoningEffort) args.push("--config", `model_reasoning_effort="${reasoningEffort}"`);
+    args.push(sessionId, prompt);
+    return args;
   }
 
   const args = ["exec", "--json", "--skip-git-repo-check"];
+  if (model) args.push("--model", model);
+  if (reasoningEffort) args.push("--config", `model_reasoning_effort="${reasoningEffort}"`);
   if (cwd) args.push("--cd", cwd);
   args.push(prompt);
   return args;
 }
 
-export function runCodex({ prompt, sessionId, cwd, env = process.env, onEvent, onExit }) {
-  const command = env.CODEX_WEB_CODEX_BIN || (os.platform() === "win32" ? "codex.cmd" : "codex");
-  const args = buildCodexArgs({ prompt, sessionId, cwd });
+export function runCodex({ prompt, sessionId, cwd, model, reasoningEffort, env = process.env, onEvent, onExit }) {
+  const command = env.CODEX_WEB_CODEX_BIN || (os.platform() === "win32" ? "codex.exe" : "codex");
+  const args = buildCodexArgs({ prompt, sessionId, cwd, model, reasoningEffort });
   const child = spawn(command, args, {
     cwd: cwd || process.cwd(),
     env,
