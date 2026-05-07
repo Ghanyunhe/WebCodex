@@ -42,6 +42,7 @@ const state = {
   token: localStorage.getItem("codex-web-token") || "dev-token",
   model: localStorage.getItem("codex-web-model") || "",
   reasoningEffort: localStorage.getItem("codex-web-reasoning-effort") || "",
+  executionMode: localStorage.getItem("codex-web-execution-mode") || "",
   connected: false,
   connectionStatus: "disconnected",
   diagnostics: null,
@@ -54,6 +55,7 @@ const state = {
   sidebar: { projects: [], totalSessionCount: 0 },
   modelOptions: [],
   reasoningEffortOptions: [],
+  executionModeOptions: [],
   openPicker: "",
   busy: false
 };
@@ -79,6 +81,8 @@ const els = {
   modelMenu: document.querySelector("#modelMenu"),
   reasoningButton: document.querySelector("#reasoningButton"),
   reasoningMenu: document.querySelector("#reasoningMenu"),
+  executionButton: document.querySelector("#executionButton"),
+  executionMenu: document.querySelector("#executionMenu"),
   cwd: document.querySelector("#cwd"),
   messages: document.querySelector("#messages"),
   chatForm: document.querySelector("#chatForm"),
@@ -124,6 +128,7 @@ els.toggleLogs.addEventListener("click", () => {
 
 els.modelButton.addEventListener("click", () => togglePicker("model"));
 els.reasoningButton.addEventListener("click", () => togglePicker("reasoning"));
+els.executionButton.addEventListener("click", () => togglePicker("execution"));
 
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".picker")) {
@@ -157,6 +162,7 @@ async function loadConfig() {
   if (config.defaultCwd) els.cwd.value = config.defaultCwd;
   state.modelOptions = config.modelOptions || [];
   state.reasoningEffortOptions = config.reasoningEffortOptions || [];
+  state.executionModeOptions = config.executionModeOptions || [];
   if (!state.model && config.defaultModel) {
     state.model = String(config.defaultModel);
     localStorage.setItem("codex-web-model", state.model);
@@ -164,6 +170,10 @@ async function loadConfig() {
   if (!state.reasoningEffort && config.defaultReasoningEffort) {
     state.reasoningEffort = String(config.defaultReasoningEffort);
     localStorage.setItem("codex-web-reasoning-effort", state.reasoningEffort);
+  }
+  if (!state.executionMode && config.defaultExecutionMode) {
+    state.executionMode = String(config.defaultExecutionMode);
+    localStorage.setItem("codex-web-execution-mode", state.executionMode);
   }
   renderPickerButtons();
   renderPickerMenus();
@@ -319,11 +329,13 @@ function updateComposerState() {
   els.send.disabled = disabled;
   els.modelButton.disabled = disabled;
   els.reasoningButton.disabled = disabled;
+  els.executionButton.disabled = disabled;
 }
 
 function renderPickerButtons() {
   els.reasoningButton.innerHTML = `${reasoningLabel(state.reasoningEffort || "medium")}${ICONS.chevronDown}`;
   els.modelButton.innerHTML = `${state.model || "gpt-5.4"}${ICONS.chevronDown}`;
+  els.executionButton.innerHTML = `${executionModeLabel(state.executionMode || "workspace-write")}${ICONS.chevronDown}`;
 }
 
 function renderPickerMenus() {
@@ -356,6 +368,21 @@ function renderPickerMenus() {
     })
   );
   els.modelMenu.replaceChildren(...modelItems);
+
+  const executionItems = state.executionModeOptions.map((value) =>
+    buildMenuItem({
+      text: executionModeLabel(value),
+      selected: value === state.executionMode,
+      onSelect: () => {
+        state.executionMode = value;
+        localStorage.setItem("codex-web-execution-mode", state.executionMode);
+        renderPickerButtons();
+        renderPickerMenus();
+        closePicker();
+      }
+    })
+  );
+  els.executionMenu.replaceChildren(...executionItems);
 }
 
 function buildMenuItem({ text, selected, onSelect }) {
@@ -382,10 +409,13 @@ function closePicker() {
 function syncPickerVisibility() {
   const reasoningOpen = state.openPicker === "reasoning";
   const modelOpen = state.openPicker === "model";
+  const executionOpen = state.openPicker === "execution";
   els.reasoningMenu.hidden = !reasoningOpen;
   els.modelMenu.hidden = !modelOpen;
+  els.executionMenu.hidden = !executionOpen;
   els.reasoningButton.setAttribute("aria-expanded", String(reasoningOpen));
   els.modelButton.setAttribute("aria-expanded", String(modelOpen));
+  els.executionButton.setAttribute("aria-expanded", String(executionOpen));
 }
 
 function reasoningLabel(value) {
@@ -394,6 +424,15 @@ function reasoningLabel(value) {
     medium: "中",
     high: "高",
     xhigh: "超高"
+  };
+  return labels[value] || value;
+}
+
+function executionModeLabel(value) {
+  const labels = {
+    "read-only": "只读",
+    "workspace-write": "工作区写入",
+    "danger-full-access": "完全访问"
   };
   return labels[value] || value;
 }
@@ -611,7 +650,8 @@ async function sendPrompt(prompt) {
         sessionId: state.selectedSessionId,
         cwd: els.cwd.value.trim(),
         model: state.model.trim(),
-        reasoningEffort: state.reasoningEffort.trim()
+        reasoningEffort: state.reasoningEffort.trim(),
+        executionMode: state.executionMode.trim()
       })
     });
 

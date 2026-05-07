@@ -23,6 +23,12 @@ test("server serves static app and protected config API", async () => {
     assert.equal(allowed.status, 200);
     const config = await allowed.json();
     assert.equal(typeof config.defaultCwd, "string");
+    assert.equal(config.defaultExecutionMode, "workspace-write");
+    assert.deepEqual(config.executionModeOptions, [
+      "read-only",
+      "workspace-write",
+      "danger-full-access"
+    ]);
 
     const badChat = await fetch(`${baseUrl}/api/chat`, {
       method: "POST",

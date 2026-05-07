@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   AppServerManager,
   buildAppServerLaunch,
+  buildExecutionConfig,
   buildSidebarTree,
   flattenThreadMessages,
+  getDefaultExecutionMode,
   normalizeThread,
   normalizeTurnNotification,
   threadHasPendingTurn
@@ -17,6 +19,18 @@ test("buildAppServerLaunch prefers a direct codex binary when configured", () =>
     command: "/usr/local/bin/codex",
     args: ["app-server"]
   });
+});
+
+test("execution config falls back to workspace write and accepts full access", () => {
+  assert.deepEqual(buildExecutionConfig("danger-full-access"), {
+    approvalPolicy: "never",
+    sandbox: "danger-full-access"
+  });
+  assert.deepEqual(buildExecutionConfig("unknown-value"), {
+    approvalPolicy: "never",
+    sandbox: "workspace-write"
+  });
+  assert.equal(getDefaultExecutionMode({ CODEX_WEB_DEFAULT_EXECUTION_MODE: "read-only" }), "read-only");
 });
 
 test("normalizeThread keeps title cwd and updated timestamp", () => {
@@ -127,12 +141,16 @@ test("streamTurn rejects when the turn completes with a failure", async () => {
   manager.status = "connected";
 
   let requestCount = 0;
-  manager.request = async (method) => {
+  manager.request = async (method, params) => {
     requestCount += 1;
     if (method === "thread/start") {
+      assert.equal(params.sandbox, "workspace-write");
+      assert.equal(params.approvalPolicy, "never");
       return { thread: { id: "thr_1", cwd: "/workspace", createdAt: 1778119886 } };
     }
     if (method === "turn/start") {
+      assert.equal(params.sandbox, "workspace-write");
+      assert.equal(params.approvalPolicy, "never");
       queueMicrotask(() => {
         manager.emit("notification", {
           method: "turn/completed",
@@ -225,4 +243,41 @@ test("streamTurn reconnects before resuming a thread with a pending turn", async
     "thread/resume",
     "turn/start"
   ]);
+});
+
+test("streamTurn forwards selected execution mode to thread start and turn start", async () => {
+  const manager = new AppServerManager({ env: {} });
+  manager.status = "connected";
+
+  const seen = [];
+  manager.request = async (method, params) => {
+    seen.push({ method, params });
+    if (method === "thread/start") {
+      return { thread: { id: "thr_99", cwd: "/workspace", createdAt: 1778119886 } };
+    }
+    if (method === "turn/start") {
+      queueMicrotask(() => {
+        manager.emit("notification", {
+          method: "turn/completed",
+          params: {
+            threadId: "thr_99",
+            turn: { id: "turn_99", status: "completed" }
+          }
+        });
+      });
+      return { turn: { id: "turn_99" } };
+    }
+    throw new Error(`unexpected method: ${method}`);
+  };
+
+  await manager.streamTurn({
+    cwd: "/workspace",
+    prompt: "hello",
+    executionMode: "danger-full-access"
+  });
+
+  assert.equal(seen[0].params.sandbox, "danger-full-access");
+  assert.equal(seen[0].params.approvalPolicy, "never");
+  assert.equal(seen[1].params.sandbox, "danger-full-access");
+  assert.equal(seen[1].params.approvalPolicy, "never");
 });

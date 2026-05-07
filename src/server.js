@@ -3,7 +3,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { AppServerManager } from "./appServerManager.js";
+import {
+  AppServerManager,
+  getDefaultExecutionMode,
+  getExecutionModeOptions
+} from "./appServerManager.js";
 import { isAuthorized } from "./auth.js";
 import {
   getProjectSummary,
@@ -33,6 +37,8 @@ export const server = createServer(async (req, res) => {
         modelOptions: getModelOptions(),
         defaultReasoningEffort: process.env.CODEX_WEB_DEFAULT_REASONING_EFFORT || "medium",
         reasoningEffortOptions: getReasoningEffortOptions(),
+        defaultExecutionMode: getDefaultExecutionMode(),
+        executionModeOptions: getExecutionModeOptions(),
         terminalUrl: process.env.CODEX_WEB_TERMINAL_URL || "",
         transportMode: "app-server"
       });
@@ -140,6 +146,7 @@ async function streamChat(req, res) {
       cwd: body.cwd ? String(body.cwd) : process.env.CODEX_WEB_DEFAULT_CWD,
       model: body.model ? String(body.model).trim() : "",
       reasoningEffort: body.reasoningEffort ? String(body.reasoningEffort).trim() : "",
+      executionMode: body.executionMode ? String(body.executionMode).trim() : "",
       onEvent: (event) => {
         if (event.type === "thread") return writeSse(res, "thread", event.thread);
         if (event.type === "assistant-delta") return writeSse(res, "delta", { delta: event.delta });

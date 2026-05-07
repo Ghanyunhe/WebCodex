@@ -5,6 +5,7 @@ import os from "node:os";
 
 const DEFAULT_MODEL_OPTIONS = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"];
 const DEFAULT_REASONING_OPTIONS = ["low", "medium", "high", "xhigh"];
+const DEFAULT_EXECUTION_OPTIONS = ["read-only", "workspace-write", "danger-full-access"];
 const DEFAULT_SOURCE_KINDS = ["cli", "vscode", "exec", "appServer"];
 
 export class AppServerManager extends EventEmitter {
@@ -33,7 +34,9 @@ export class AppServerManager extends EventEmitter {
       defaultModel: this.env.CODEX_WEB_DEFAULT_MODEL || "gpt-5.4",
       modelOptions: getModelOptions(this.env),
       defaultReasoningEffort: this.env.CODEX_WEB_DEFAULT_REASONING_EFFORT || "medium",
-      reasoningEffortOptions: DEFAULT_REASONING_OPTIONS
+      reasoningEffortOptions: DEFAULT_REASONING_OPTIONS,
+      defaultExecutionMode: getDefaultExecutionMode(this.env),
+      executionModeOptions: DEFAULT_EXECUTION_OPTIONS
     };
   }
 
@@ -109,16 +112,16 @@ export class AppServerManager extends EventEmitter {
     return flattenThreadMessages(result?.thread);
   }
 
-  async streamTurn({ threadId = "", cwd, model, reasoningEffort, prompt, onEvent }) {
+  async streamTurn({ threadId = "", cwd, model, reasoningEffort, executionMode, prompt, onEvent }) {
     await this.assertConnected();
 
     let thread = threadId
-      ? await this.request("thread/resume", buildResumeParams({ threadId, cwd, model }))
-      : await this.request("thread/start", buildStartThreadParams({ cwd, model }));
+      ? await this.request("thread/resume", buildResumeParams({ threadId, cwd, model, executionMode }))
+      : await this.request("thread/start", buildStartThreadParams({ cwd, model, executionMode }));
 
     if (threadId && threadHasPendingTurn(thread?.thread)) {
       await this.reconnect();
-      thread = await this.request("thread/resume", buildResumeParams({ threadId, cwd, model }));
+      thread = await this.request("thread/resume", buildResumeParams({ threadId, cwd, model, executionMode }));
     }
 
     const activeThreadId = thread?.thread?.id || threadId;
@@ -157,7 +160,7 @@ export class AppServerManager extends EventEmitter {
       ...(cwd ? { cwd } : {}),
       ...(model ? { model } : {}),
       ...(reasoningEffort ? { effort: reasoningEffort } : {}),
-      approvalPolicy: "never"
+      ...buildExecutionConfig(executionMode)
     });
 
     activeTurnId = turnResult?.turn?.id || "";
@@ -536,21 +539,21 @@ export function threadHasPendingTurn(thread = {}) {
   return turns.some((turn) => turn?.status === "inProgress");
 }
 
-function buildStartThreadParams({ cwd, model }) {
+function buildStartThreadParams({ cwd, model, executionMode }) {
   return {
     ...(model ? { model } : {}),
     ...(cwd ? { cwd } : {}),
-    approvalPolicy: "never",
-    sandbox: "workspace-write",
+    ...buildExecutionConfig(executionMode),
     serviceName: "codex-web-remote"
   };
 }
 
-function buildResumeParams({ threadId, cwd, model }) {
+function buildResumeParams({ threadId, cwd, model, executionMode }) {
   return {
     threadId,
     ...(model ? { model } : {}),
     ...(cwd ? { cwd } : {}),
+    ...buildExecutionConfig(executionMode),
     serviceName: "codex-web-remote"
   };
 }
@@ -563,4 +566,25 @@ function getModelOptions(env = process.env) {
   const raw = env.CODEX_WEB_MODEL_OPTIONS?.trim();
   if (!raw) return DEFAULT_MODEL_OPTIONS;
   return raw.split(",").map((value) => value.trim()).filter(Boolean);
+}
+
+export function buildExecutionConfig(executionMode, env = process.env) {
+  const sandbox = normalizeExecutionMode(executionMode || getDefaultExecutionMode(env));
+  return {
+    approvalPolicy: "never",
+    sandbox
+  };
+}
+
+export function getDefaultExecutionMode(env = process.env) {
+  return normalizeExecutionMode(env.CODEX_WEB_DEFAULT_EXECUTION_MODE || "workspace-write");
+}
+
+export function getExecutionModeOptions() {
+  return [...DEFAULT_EXECUTION_OPTIONS];
+}
+
+function normalizeExecutionMode(value) {
+  const normalized = String(value || "").trim();
+  return DEFAULT_EXECUTION_OPTIONS.includes(normalized) ? normalized : "workspace-write";
 }
