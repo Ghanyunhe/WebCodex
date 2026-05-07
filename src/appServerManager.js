@@ -112,9 +112,14 @@ export class AppServerManager extends EventEmitter {
   async streamTurn({ threadId = "", cwd, model, reasoningEffort, prompt, onEvent }) {
     await this.assertConnected();
 
-    const thread = threadId
+    let thread = threadId
       ? await this.request("thread/resume", buildResumeParams({ threadId, cwd, model }))
       : await this.request("thread/start", buildStartThreadParams({ cwd, model }));
+
+    if (threadId && threadHasPendingTurn(thread?.thread)) {
+      await this.reconnect();
+      thread = await this.request("thread/resume", buildResumeParams({ threadId, cwd, model }));
+    }
 
     const activeThreadId = thread?.thread?.id || threadId;
     if (!activeThreadId) throw new Error("App-server did not return a thread id");
@@ -177,6 +182,12 @@ export class AppServerManager extends EventEmitter {
   async assertConnected() {
     if (this.status === "connected") return;
     throw new Error("Not connected to app-server");
+  }
+
+  async reconnect() {
+    this.stopProcess();
+    this.setStatus("disconnected");
+    await this.connect();
   }
 
   async startProcess() {
@@ -517,6 +528,12 @@ export function normalizeTurnNotification(message, threadId, turnId) {
   }
 
   return null;
+}
+
+export function threadHasPendingTurn(thread = {}) {
+  if (thread?.status?.type === "active") return true;
+  const turns = Array.isArray(thread?.turns) ? thread.turns : [];
+  return turns.some((turn) => turn?.status === "inProgress");
 }
 
 function buildStartThreadParams({ cwd, model }) {

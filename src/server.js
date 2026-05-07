@@ -117,7 +117,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 }
 
 async function streamChat(req, res) {
-  const body = await readJsonBody(req);
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (error) {
+    return sendJson(res, error.statusCode || 400, { error: error.message });
+  }
   const prompt = String(body.prompt || "").trim();
   if (!prompt) return sendJson(res, 400, { error: "Prompt is required" });
 
@@ -166,7 +171,14 @@ function writeSse(res, event, data) {
 async function readJsonBody(req) {
   let raw = "";
   for await (const chunk of req) raw += chunk;
-  return raw ? JSON.parse(raw) : {};
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const error = new Error("Invalid JSON body");
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 async function serveStatic(urlPath, res) {

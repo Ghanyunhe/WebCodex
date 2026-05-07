@@ -7,7 +7,8 @@ import {
   buildSidebarTree,
   flattenThreadMessages,
   normalizeThread,
-  normalizeTurnNotification
+  normalizeTurnNotification,
+  threadHasPendingTurn
 } from "../src/appServerManager.js";
 
 test("buildAppServerLaunch prefers a direct codex binary when configured", () => {
@@ -155,4 +156,73 @@ test("streamTurn rejects when the turn completes with a failure", async () => {
     /usage limit exceeded/
   );
   assert.equal(requestCount, 2);
+});
+
+test("threadHasPendingTurn detects active or in-progress turns", () => {
+  assert.equal(threadHasPendingTurn({ status: { type: "active" } }), true);
+  assert.equal(threadHasPendingTurn({ turns: [{ status: "inProgress" }] }), true);
+  assert.equal(threadHasPendingTurn({ status: { type: "idle" }, turns: [{ status: "completed" }] }), false);
+});
+
+test("streamTurn reconnects before resuming a thread with a pending turn", async () => {
+  const manager = new AppServerManager({ env: {} });
+  manager.status = "connected";
+
+  const calls = [];
+  let resumeCount = 0;
+
+  manager.connect = async () => {
+    calls.push("connect");
+    manager.status = "connected";
+    return manager.getStatus();
+  };
+
+  manager.stopProcess = () => {
+    calls.push("stopProcess");
+    manager.status = "disconnected";
+  };
+
+  manager.request = async (method) => {
+    calls.push(method);
+    if (method === "thread/resume") {
+      resumeCount += 1;
+      return {
+        thread: {
+          id: "thr_1",
+          cwd: "/workspace",
+          updatedAt: 1778119886,
+          status: { type: resumeCount === 1 ? "active" : "idle" },
+          turns: resumeCount === 1 ? [{ id: "turn_old", status: "inProgress" }] : []
+        }
+      };
+    }
+    if (method === "turn/start") {
+      queueMicrotask(() => {
+        manager.emit("notification", {
+          method: "turn/completed",
+          params: {
+            threadId: "thr_1",
+            turn: { id: "turn_1", status: "completed" }
+          }
+        });
+      });
+      return { turn: { id: "turn_1" } };
+    }
+    throw new Error(`unexpected method: ${method}`);
+  };
+
+  const result = await manager.streamTurn({
+    threadId: "thr_1",
+    cwd: "/workspace",
+    prompt: "hello"
+  });
+
+  assert.equal(result.threadId, "thr_1");
+  assert.deepEqual(calls, [
+    "thread/resume",
+    "stopProcess",
+    "connect",
+    "thread/resume",
+    "turn/start"
+  ]);
 });

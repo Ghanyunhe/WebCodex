@@ -23,6 +23,20 @@ test("server serves static app and protected config API", async () => {
     assert.equal(allowed.status, 200);
     const config = await allowed.json();
     assert.equal(typeof config.defaultCwd, "string");
+
+    const badChat = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer dev-token",
+        "Content-Type": "application/json"
+      },
+      body: "{bad json"
+    });
+    assert.equal(badChat.status, 400);
+    assert.deepEqual(await badChat.json(), { error: "Invalid JSON body" });
+
+    const health = await fetch(`${baseUrl}/healthz`);
+    assert.equal(health.status, 200);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
