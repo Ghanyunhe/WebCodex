@@ -120,3 +120,39 @@ test("manager records warnings and stderr logs in diagnostics", () => {
   assert.equal(diagnostics.logs[0].level, "warn");
   assert.equal(diagnostics.logs[1].level, "warn");
 });
+
+test("streamTurn rejects when the turn completes with a failure", async () => {
+  const manager = new AppServerManager({ env: {} });
+  manager.status = "connected";
+
+  let requestCount = 0;
+  manager.request = async (method) => {
+    requestCount += 1;
+    if (method === "thread/start") {
+      return { thread: { id: "thr_1", cwd: "/workspace", createdAt: 1778119886 } };
+    }
+    if (method === "turn/start") {
+      queueMicrotask(() => {
+        manager.emit("notification", {
+          method: "turn/completed",
+          params: {
+            threadId: "thr_1",
+            turn: {
+              id: "turn_1",
+              status: "failed",
+              error: { message: "usage limit exceeded" }
+            }
+          }
+        });
+      });
+      return { turn: { id: "turn_1" } };
+    }
+    throw new Error(`unexpected method: ${method}`);
+  };
+
+  await assert.rejects(
+    () => manager.streamTurn({ cwd: "/workspace", prompt: "hello" }),
+    /usage limit exceeded/
+  );
+  assert.equal(requestCount, 2);
+});

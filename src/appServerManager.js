@@ -161,6 +161,12 @@ export class AppServerManager extends EventEmitter {
     const result = await completion.finally(() => {
       if (!resolved) return;
     });
+    const failure = result.notifications.find(
+      (entry) => entry.type === "turn-completed" && entry.status && entry.status !== "completed"
+    );
+    if (failure) {
+      throw new Error(failure.error?.message || `Turn failed with status ${failure.status}`);
+    }
     return {
       threadId: activeThreadId,
       turnId: activeTurnId,

@@ -5,6 +5,7 @@ import os from "node:os";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const SQLITE_QUERY_MAX_BUFFER = 16 * 1024 * 1024;
 
 export function getCodexHome(env = process.env) {
   return env.CODEX_HOME || path.join(os.homedir(), ".codex");
@@ -190,8 +191,17 @@ async function listSessionsFromSqlite({ codexHome, limit }) {
     "order by coalesce(updated_at_ms, updated_at * 1000) desc",
     `limit ${Number(limit) || 100}`
   ].join(" ");
-  const { stdout } = await execFileAsync("sqlite3", ["-json", dbPath, sql], { windowsHide: true });
-  return parseThreadsJson(stdout);
+  try {
+    const { stdout } = await execFileAsync("sqlite3", ["-json", dbPath, sql], {
+      windowsHide: true,
+      maxBuffer: SQLITE_QUERY_MAX_BUFFER
+    });
+    return parseThreadsJson(stdout);
+  } catch (error) {
+    const stdout = await querySqliteWithPython(dbPath, sql);
+    if (!stdout) throw error;
+    return parseThreadsJson(stdout);
+  }
 }
 
 function extractContentText(content) {
@@ -217,4 +227,35 @@ async function findRolloutFile(dir, sessionId) {
     }
   }
   return null;
+}
+
+async function querySqliteWithPython(dbPath, sql) {
+  const script = [
+    "import json, sqlite3, sys",
+    "db_path, query = sys.argv[1], sys.argv[2]",
+    "con = sqlite3.connect(db_path)",
+    "con.row_factory = sqlite3.Row",
+    "rows = [dict(row) for row in con.execute(query).fetchall()]",
+    "print(json.dumps(rows, ensure_ascii=False))"
+  ].join("\n");
+
+  for (const command of pythonCandidates()) {
+    try {
+      const { stdout } = await execFileAsync(command, ["-c", script, dbPath, sql], {
+        windowsHide: true,
+        maxBuffer: SQLITE_QUERY_MAX_BUFFER
+      });
+      if (stdout.trim()) return stdout;
+    } catch {
+      // Try the next python launcher.
+    }
+  }
+
+  return "";
+}
+
+function pythonCandidates() {
+  return os.platform() === "win32"
+    ? ["python", "py"]
+    : ["/usr/bin/python3", "python3", "/usr/bin/python", "python"];
 }

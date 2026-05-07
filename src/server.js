@@ -5,6 +5,12 @@ import { fileURLToPath } from "node:url";
 
 import { AppServerManager } from "./appServerManager.js";
 import { isAuthorized } from "./auth.js";
+import {
+  getProjectSummary,
+  getSidebarTree as getStoredSidebarTree,
+  listSessions,
+  readSessionMessages
+} from "./sessions.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "..", "public");
@@ -32,6 +38,24 @@ export const server = createServer(async (req, res) => {
       });
     }
 
+    if (req.method === "GET" && url.pathname === "/healthz") {
+      return sendJson(res, 200, {
+        ok: true,
+        service: "codex-web-remote",
+        transportMode: "app-server",
+        appServerStatus: appServer.getStatus().status
+      });
+    }
+
+    if (req.method === "GET" && url.pathname === "/readyz") {
+      const status = appServer.getStatus();
+      return sendJson(res, status.connected ? 200 : 503, {
+        ok: status.connected,
+        service: "codex-web-remote",
+        appServerStatus: status.status
+      });
+    }
+
     if (req.method === "GET" && url.pathname === "/api/connection/status") {
       return sendJson(res, 200, appServer.getStatus());
     }
@@ -50,24 +74,26 @@ export const server = createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/api/sidebar") {
       const limit = Number(url.searchParams.get("limit") || 1000);
-      return sendJson(res, 200, await appServer.getSidebar({ limit }));
+      return sendJson(res, 200, await getStoredSidebarTree({ limit }));
     }
 
     if (req.method === "GET" && url.pathname === "/api/sessions") {
       const limit = Number(url.searchParams.get("limit") || 100);
       const cwd = url.searchParams.get("cwd") || "";
-      const sessions = await appServer.listThreads({ limit, cwd });
+      const sessions = (await listSessions({ limit: Math.max(limit, 1000) }))
+        .filter((session) => !cwd || session.cwd === cwd)
+        .slice(0, limit);
       return sendJson(res, 200, { sessions });
     }
 
     if (req.method === "GET" && url.pathname === "/api/projects") {
       const limit = Number(url.searchParams.get("limit") || 500);
-      return sendJson(res, 200, await appServer.getSidebar({ limit }));
+      return sendJson(res, 200, await getProjectSummary({ limit }));
     }
 
     if (req.method === "GET" && url.pathname.startsWith("/api/sessions/")) {
       const sessionId = decodeURIComponent(url.pathname.split("/").at(-1));
-      return sendJson(res, 200, { messages: await appServer.readThreadMessages(sessionId) });
+      return sendJson(res, 200, { messages: await readSessionMessages(sessionId) });
     }
 
     if (req.method === "POST" && url.pathname === "/api/chat") {
@@ -115,6 +141,15 @@ async function streamChat(req, res) {
         if (event.type === "assistant-complete") return writeSse(res, "message", { text: event.text });
       }
     });
+    const failure = result.notifications?.find(
+      (entry) => entry.type === "turn-completed" && entry.status && entry.status !== "completed"
+    );
+    if (failure) {
+      writeSse(res, "error", {
+        message: failure.error?.message || `Turn failed with status ${failure.status}`
+      });
+      return;
+    }
     writeSse(res, "done", result);
   } catch (error) {
     writeSse(res, "error", { message: error.message });
